@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 import os
+import threading
 import time
 import itertools
 import codecs
 import re
+import traceback
 from math import ceil
 from collections import namedtuple
 from contextlib import contextmanager
@@ -522,6 +524,26 @@ def format_tb(*args, **kw):
         return traceback.format_tb(*args)
     finally:
         traceback._format_list_iter = orig
+
+
+def format_thread_stack(frame, after_module=threading):
+    stack = traceback.extract_stack(frame)
+    i = 0
+    if after_module:
+        found = False
+        # skip everything until after specified module
+        for i, (fname, *_) in enumerate(stack):
+            if fname == after_module.__file__:
+                for i, (fname, *_) in enumerate(stack[i:], i):
+                    if fname != after_module.__file__:
+                        found = True
+                        break
+                break
+
+        if not found:
+            i = 0
+
+    return ''.join(traceback.format_list(stack[i:]))
 
 
 def format_table(table, titles=True):

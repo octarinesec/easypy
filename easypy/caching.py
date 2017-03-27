@@ -159,7 +159,7 @@ def locking_lru_cache(maxsize=128, typed=False):
     return deco
 
 
-def timecache(expiration=0, typed=False, get_ts_func=time.time, log_recalculation=False):
+def timecache(expiration=0, typed=False, time_func=time.time, log_recalculation=False):
     """
     An lru cache with a lock, preventing concurrent invocations and allowing caching accross threads.
 
@@ -188,7 +188,7 @@ def timecache(expiration=0, typed=False, get_ts_func=time.time, log_recalculatio
                     pass  # nothing to fuss with, cache does not expire
                 elif result is NOT_FOUND:
                     pass  # cache is empty
-                elif get_ts_func() - ts >= expiration:
+                elif time_func() - ts >= expiration:
                     # cache expired
                     result = NOT_FOUND
                     del cache[key]
@@ -197,7 +197,7 @@ def timecache(expiration=0, typed=False, get_ts_func=time.time, log_recalculatio
                     if log_recalculation:
                         _logger.debug('time cache expired, calculating new value for %s', name)
                     result = func(*args, **kwargs)
-                    cache[key] = result, get_ts_func()
+                    cache[key] = result, time_func()
 
                 return result
 

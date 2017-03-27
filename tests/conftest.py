@@ -5,8 +5,8 @@ import os
 from easypy import logging as easypy_logging
 
 if os.getenv("GEVENT") == "true":
-    from easypy.gevent import patch_all
-    patch_all()
+    from easypy.gevent.patching import apply_gevent_patch
+    apply_gevent_patch()
 
 
 logging.addLevelName(logging.WARN, "WARN")  # instead of "WARNING", so that it takes less space...

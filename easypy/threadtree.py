@@ -15,8 +15,11 @@ from contextlib import contextmanager
 import _thread
 import threading
 
+from easypy.humanize import format_thread_stack
+
+from easypy.gevent.patching import main_thread_ident_before_patching, is_module_patched
+from easypy.gevent import non_patched_threadpool
 from .bunch import Bunch
-from .gevent import is_module_patched
 from .collections import ilistify
 
 UUIDS_TREE = {}
@@ -120,35 +123,25 @@ threading.Thread.uuid = property(get_thread_uuid)
 
 if is_module_patched("threading"):
     main_thread = threading.main_thread()
-    main_thread.parent = threading._DummyThread.parent = property(get_thread_parent)
-    main_thread.uuid = threading._DummyThread.uuid = property(get_thread_uuid)
+    main_thread.parent = threading._DummyThread.parent = threading.Timer.parent = property(get_thread_parent)
+    main_thread.uuid = threading._DummyThread.uuid = threading.Timer.uuid = property(get_thread_uuid)
 
     def iter_thread_frames():
         for thread in threading.enumerate():
-            yield thread.ident, thread._greenlet.gr_frame if getattr(thread, '_greenlet', None) else None
+            if getattr(thread, '_greenlet', None) and thread._greenlet.gr_frame:
+                # a thread with greenlet but without gr_frame will be fetched from sys._current_frames
+                # If we switch to another greenlet by the time we get there we will get inconsistent dup of threads.
+                # TODO - make best-effort attempt to show coherent thread dump
+                yield thread.ident, thread._greenlet.gr_frame
+
+        for ident, frame in sys._current_frames().items():
+            if ident == main_thread_ident_before_patching:
+                ident = threading.main_thread().ident
+            yield ident, frame
 else:
     def iter_thread_frames():
         yield from sys._current_frames().items()
 
-
-def format_thread_stack(frame, after_module=threading):
-    stack = traceback.extract_stack(frame)
-    i = 0
-    if after_module:
-        found = False
-        # skip everything until after specified module
-        for i, (fname, *_) in enumerate(stack):
-            if fname == after_module.__file__:
-                for i, (fname, *_) in enumerate(stack[i:], i):
-                    if fname != after_module.__file__:
-                        found = True
-                        break
-                break
-
-        if not found:
-            i = 0
-
-    return ''.join(traceback.format_list(stack[i:]))
 
 
 def get_thread_tree(including_this=True):
@@ -241,13 +234,22 @@ def watch_threads(interval):
     def dump_threads():
         nonlocal last_threads
 
+        _logger.debug('getting thread tree')
         tree = get_thread_tree(including_this=False)
-        _threads_logger.debug("threads", extra=dict(cmdline=cmdline, tree=tree.to_dict()))
+        _logger.debug('done getting thread tree')
 
+
+        _logger.debug('logging threads to yaml')
+        _threads_logger.debug("threads", extra=dict(cmdline=cmdline, tree=tree.to_dict()))
+        _logger.debug('done logging threads to yaml')
+
+        _logger.debug('creating current thread set')
         current_threads = set()
         for thread in threading.enumerate():
             if thread.ident:
                 current_threads.add(thread.ident)
+        _logger.debug('done creating current thread set')
+
 
         new_threads = current_threads - last_threads
         closed_threads = last_threads - current_threads
@@ -261,7 +263,12 @@ def watch_threads(interval):
 
         last_threads = current_threads
 
-    thread = concurrent(dump_threads, threadname="ThreadWatch", loop=True, sleep=interval)
+    os_thread = False
+    if non_patched_threadpool.non_patched_threadpool:
+        os_thread = True
+
+
+    thread = concurrent(dump_threads, threadname="ThreadWatch", loop=True, sleep=interval, os_thread=os_thread)
     thread.start()
     _logger.info("threads watcher started")
 

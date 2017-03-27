@@ -22,21 +22,52 @@ import time
 
 from easypy.decorations import parametrizeable_decorator
 from easypy.exceptions import TException, PException
-from easypy.gevent import is_module_patched
 from easypy.humanize import IndentableTextBuffer, time_duration
 from easypy.misc import Hex
-from easypy.threadtree import format_thread_stack, iter_thread_frames
+from easypy.humanize import format_thread_stack
+from easypy.threadtree import iter_thread_frames
 from easypy.timing import Timer
 from easypy.units import MINUTE, HOUR
+from easypy.gevent import non_patched_threadpool
+from easypy.gevent.patching import is_module_patched
+
 
 this_module = import_module(__name__)
 
 
 MAX_THREAD_POOL_SIZE = 50
+CONCURRENT_FIND_DEFAULT_BATCH_SIZE = 10
+
+
+def async_raise_in_main_thread(exc, use_concurrent_loop=True):
+    from plumbum import local
+    pid = os.getpid()
+    if not REGISTERED_SIGNAL:
+        raise NotInitialized()
+
+    # sometimes the signal isn't caught by the main-thread, so we should try a few times (WEKAPP-14543)
+    def do_signal(raised_exc):
+        global LAST_ERROR
+        if LAST_ERROR is not raised_exc:
+            _logger.debug("MainThread took the exception - we're done here")
+            if use_concurrent_loop:
+                raiser.stop()
+            return
+
+        _logger.info("Raising %s in main thread", type(LAST_ERROR))
+        local.cmd.kill("-%d" % REGISTERED_SIGNAL, pid)
+
+    if use_concurrent_loop:
+        raiser = concurrent(do_signal, raised_exc=exc, loop=True, sleep=30, daemon=True, throw=False)
+        raiser.start()
+    else:
+        do_signal(exc)
+
+
 
 if is_module_patched("threading"):
     import gevent
-    MAX_THREAD_POOL_SIZE = 5000  # these are not threads anymore, but greenlets. so we allow a lot of them
+    MAX_THREAD_POOL_SIZE = 300  # these are not threads anymore, but greenlets. so we allow more of them
 
     def _rimt(exc):
         _logger.info('YELLOW<<killing main thread greenlet>>')
@@ -54,25 +85,7 @@ if is_module_patched("threading"):
         _logger.debug('exiting the thread that failed')
         raise exc
 else:
-    def _rimt(exc):
-        from plumbum import local
-        pid = os.getpid()
-        if not REGISTERED_SIGNAL:
-            raise NotInitialized()
-
-        # sometimes the signal isn't caught by the main-thread, so we should try a few times (WEKAPP-14543)
-        def do_signal(raised_exc):
-            global LAST_ERROR
-            if LAST_ERROR is not raised_exc:
-                _logger.debug("MainThread took the exception - we're done here")
-                raiser.stop()
-                return
-
-            _logger.info("Raising %s in main thread", type(LAST_ERROR))
-            local.cmd.kill("-%d" % REGISTERED_SIGNAL, pid)
-
-        raiser = concurrent(do_signal, raised_exc=exc, loop=True, sleep=30, daemon=True, throw=False)
-        raiser.start()
+    _rimt = async_raise_in_main_thread
 
 
 _logger = logging.getLogger(__name__)
@@ -377,22 +390,31 @@ def async(func, params=None, workers=None, log_contexts=None, final_timeout=2.0,
 
 def concurrent_find(func, params, **kw):
     timeout = kw.pop("concurrent_timeout", None)
-    with async(func, list(params), **kw) as futures:
-        future = None
-        try:
-            for future in futures.as_completed(timeout=timeout):
-                if not future.exception() and future.result():
-                    futures.kill()
-                    return future.result()
-            else:
-                if future:
-                    future.result()
-        except FutureTimeoutError as exc:
-            if not timeout:
-                # ??
-                raise
-            futures.kill()
-            _logger.warning("Concurrent future timed out (%s)", exc)
+    batch_size = kw.pop("batch_size", CONCURRENT_FIND_DEFAULT_BATCH_SIZE)
+    params = list(params)
+
+    while True:
+        batch_params = params[:batch_size]
+        with async(func, batch_params, **kw) as futures:
+            future = None
+            try:
+                for future in futures.as_completed(timeout=timeout):
+                    if not future.exception() and future.result():
+                        futures.kill()
+                        return future.result()
+                else:
+                    if future:
+                        future.result()
+            except FutureTimeoutError as exc:
+                if not timeout:
+                    # ??
+                    raise
+                futures.kill()
+                _logger.warning("Concurrent future timed out (%s)", exc)
+        if len(params) > batch_size:
+            params = params[batch_size:]
+        else:
+            break  # this was the last batch
 
 
 def nonconcurrent_map(func, params, log_contexts=None, **kw):
@@ -784,6 +806,8 @@ class concurrent(object):
         self.sleep = kwargs.pop('sleep', 1)
         self.loop = kwargs.pop('loop', False)
         self.timer = None
+        # in case of using apply_gevent_patch function - use this option in order to defer some jobs to real threads
+        self.os_thread = kwargs.pop('os_thread', False)
 
         rimt = kwargs.pop("raise_in_main_thread", False)
         if rimt:
@@ -796,6 +820,8 @@ class concurrent(object):
             flags += 'D'
         if self.loop:
             flags += 'L'
+        if self.os_thread:
+            flags += 'T'
         return "<%s[%s] '%s'>" % (self.__class__.__name__, self.threadname, flags)
 
     def _logged_func(self):
@@ -821,6 +847,14 @@ class concurrent(object):
         self.stopper.set()
 
     def wait(self, timeout=None):
+        if self.os_thread:
+            # we are not waiting on the event so we dont block gevent hub from real thread
+            if self.stopper.is_set():
+                return True
+            gevent.monkey.saved['time']['sleep'](timeout)
+            if self.stopper.is_set():
+                return True
+            return False
         return self.stopper.wait(timeout)
 
     @contextmanager
@@ -831,22 +865,29 @@ class concurrent(object):
 
     @contextmanager
     def _running(self):
-        self.thread = threading.Thread(target=self._logged_func, name=self.threadname)
-        self.thread.daemon = self.daemon
-        self.exc = None
-        self.stopper.clear()
+        if not self.os_thread:
+            self.thread = threading.Thread(target=self._logged_func, name=self.threadname)
+            self.thread.daemon = self.daemon
+            self.exc = None
+            self.stopper.clear()
 
         if _disabled:
             self._logged_func()
             yield self
             return
 
-        self.thread.start()
+        if not self.os_thread:
+            _logger.debug('sending job to gevent thread')
+            self.thread.start()
+        else:
+            _logger.debug('sending job to an os thread')
+            non_patched_threadpool.non_patched_threadpool.send_job(self._logged_func, self.threadname)
         try:
             yield self
         finally:
             self.stop()  # if we loop, stop it
-        self.thread.join()
+        if not self.os_thread:
+            self.thread.join()
         if self.throw and self.exc:
             raise self.exc
 
