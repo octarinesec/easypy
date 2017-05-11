@@ -6,8 +6,6 @@ import bisect
 import collections
 from random import choice, sample
 
-from easypy.collections import grouped
-
 choose = choice
 
 
@@ -47,49 +45,37 @@ class XRandom(random.Random):
             offset += size
 
 
-def load_dictionary(filename):
-    full_path = os.path.join(os.path.dirname(__file__), 'dictionary', filename)
-    with open(full_path) as dict_file:
-        dictionary = [line.strip() for line in dict_file]
+def random_nice_name(max_length=64, entropy=2, sep='-'):
+    """Generates a nice random name from the dictionaries in words
+    Args:
+        max_length (int, optional): Max length for the name.
+        entropy (int, optional): How unique th name will be, currently
+            entropy - 1 adjectives are joined with one noun.
+        sep (str, optional: Seperator between name parts.
 
-    grouped_by_len = grouped(dictionary, key=len)
-    return collections.defaultdict(list, grouped_by_len)
+    Returns:
+        string: The generated name.
 
+    Raises:
+        ValueError: If `param2` is equal to `param1`.
+    """
 
-NOUNS = load_dictionary('nouns.txt')
-VERBS = load_dictionary('verbs.txt')
-ADVERBS = load_dictionary('adverbs.txt')
-ADJECTIVES = load_dictionary('adjectives.txt')
-PARTS_OF_SPEECH = (ADJECTIVES, NOUNS, VERBS, ADVERBS)
+    from .words import (adjectives, creatures)
 
-
-def random_meaningful_name(max_length=50, sep='-'):
-    parts = []
-    next_max_part_len = max_length
-
-    if max_length < 3:
-        return random_string(max_length, charset=string.ascii_lowercase)
-
-    # Reverse iterate so that partial sentences will sound logical
-    for part_group in PARTS_OF_SPEECH:
-        usable_word_groups = [
-            part_group[l] for l in range(1, next_max_part_len + 1)
-            if part_group[l]
-        ]
-
-        # No available words in this group with the maximal size of
-        # next_max_part_len
-        if not usable_word_groups:
+    name = None
+    entropy = max(entropy, 1)
+    parts = (creatures, ) + (adjectives, ) * (entropy - 1)
+    for _ in range(10):
+        name_parts = [random.choice(p) for p in parts[::-1]]
+        joined = sep.join(name_parts)
+        if len(joined) <= max_length:
+            name = joined
             break
 
-        word_group = random.choice(usable_word_groups)
-        word = random.choice(word_group)
-        parts.append(word)
-        next_max_part_len -= (len(word) + len(sep))
-        if next_max_part_len <= 0:
-            break
+    if not name:
+        raise ValueError("Can't generate name under these conditions")
 
-    return sep.join(parts)
+    return name
 
 
 def random_string(length, charset=string.printable):
