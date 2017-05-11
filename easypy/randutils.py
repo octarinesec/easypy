@@ -60,34 +60,36 @@ NOUNS = load_dictionary('nouns.txt')
 VERBS = load_dictionary('verbs.txt')
 ADVERBS = load_dictionary('adverbs.txt')
 ADJECTIVES = load_dictionary('adjectives.txt')
-PARTS_OF_SPEECH = (NOUNS, VERBS, ADVERBS, ADJECTIVES)
+PARTS_OF_SPEECH = (ADVERBS, VERBS, ADJECTIVES, NOUNS)
 
 
 def random_meaningful_name(max_length=50, sep='-'):
     parts = []
-    remaining = max_length
+    next_max_part_len = max_length
 
     if max_length < 3:
         return random_string(max_length, charset=string.ascii_lowercase)
 
-    for part_group in PARTS_OF_SPEECH:
-        max_part_len = remaining - len(sep) if parts else max_length
+    # Reverse iterate so that partial sentences will sound logical
+    for part_group in PARTS_OF_SPEECH[::-1]:
         usable_word_groups = [
-            part_group[l] for l in range(1, max_part_len)
-            if len(part_group[l])
+            part_group[l] for l in range(1, next_max_part_len + 1)
+            if part_group[l]
         ]
 
         # No available words in this group with the maximal size of
-        # max_part_len
+        # next_max_part_len
         if not usable_word_groups:
             break
 
         word_group = random.choice(usable_word_groups)
         word = random.choice(word_group)
         parts.append(word)
-        remaining = remaining - len(word) - (len(sep) if len(parts) else 0)
+        next_max_part_len -= (len(word) + len(sep))
+        if next_max_part_len <= 0:
+            break
 
-    return sep.join(parts[::-1])
+    return sep.join(parts)
 
 
 def random_string(length, charset=string.printable):
