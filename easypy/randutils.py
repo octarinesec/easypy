@@ -60,7 +60,7 @@ NOUNS = load_dictionary('nouns.txt')
 VERBS = load_dictionary('verbs.txt')
 ADVERBS = load_dictionary('adverbs.txt')
 ADJECTIVES = load_dictionary('adjectives.txt')
-PARTS_OF_SPEECH = (ADVERBS, VERBS, ADJECTIVES, NOUNS)
+PARTS_OF_SPEECH = (ADJECTIVES, NOUNS, VERBS, ADVERBS)
 
 
 def random_meaningful_name(max_length=50, sep='-'):
@@ -71,7 +71,7 @@ def random_meaningful_name(max_length=50, sep='-'):
         return random_string(max_length, charset=string.ascii_lowercase)
 
     # Reverse iterate so that partial sentences will sound logical
-    for part_group in PARTS_OF_SPEECH[::-1]:
+    for part_group in PARTS_OF_SPEECH:
         usable_word_groups = [
             part_group[l] for l in range(1, next_max_part_len + 1)
             if part_group[l]
