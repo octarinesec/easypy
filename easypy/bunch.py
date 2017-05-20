@@ -177,3 +177,48 @@ def bunchify(d=None, **kw):
     if kw:
         d.update(bunchify(kw))
     return d
+
+
+class _RigidBunchRequiredKeyRegistration(dict):
+    def __init__(self):
+        self._keys = set()
+
+    def __getitem__(self, name):
+        if name.startswith('_'):
+            return super().__getitem__(name)
+        else:
+            self._keys.add(name)
+
+
+class __RigidBunchMeta(type):
+    @classmethod
+    def __prepare__(mcs, name, bases):
+        if bases:  # class the subclasses RigidBunch
+            assert bases == (RigidBunch,)
+            return _RigidBunchRequiredKeyRegistration()
+        else:  # RigidBunch itself
+            return {}
+
+    def __new__(mcs, name, bases, classdict):
+        if bases:  # class the subclasses RigidBunch
+            assert bases == (RigidBunch,)
+            return type.__new__(type, name, (Bunch,), dict(KEYS=frozenset(classdict._keys)))
+        else:  # RigidBunch itself
+            return type.__new__(mcs, name, bases, dict(classdict))
+
+
+class RigidBunch(metaclass=__RigidBunchMeta):
+    """
+    A Bunch that can only contain certain keys, and must contain them all.
+
+    Example:
+
+        class RB(Bunch):
+            a
+            b
+            c
+
+        RB(a=1, b=2)  # will fail - `c` must be set
+        RB(a=1, b=2, c=3, d=4)  # will fail - `d` is not allowed
+        RB(a=1, b=2, c=3)  # will succeed - `a`, `b` and `c` are set
+    """
