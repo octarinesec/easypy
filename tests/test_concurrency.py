@@ -1,7 +1,27 @@
 import pytest
 from time import sleep
-from easypy.threadtree import get_thread_stacks, ThreadContexts
+from easypy.threadtree import get_thread_stacks, ThreadContexts, UUIDS_TREE, IDENT_TO_UUID, UUID_TO_IDENT
 from easypy.concurrency import concurrent, MultiObject, MultiException
+
+
+@pytest.fixture(autouse=True, scope="module")
+def ensure_no_leak():
+    collections = (UUIDS_TREE, IDENT_TO_UUID, UUID_TO_IDENT)
+
+    from threading import get_ident
+    ident = get_ident()
+
+    # with concurrent(lambda: None):
+    #     pass
+    before = [set(c) for c in collections]
+
+    yield
+    sleep(1)
+
+    after = [set(c) for c in collections]
+
+    non_leak = {ident, IDENT_TO_UUID.get(ident)}
+    assert [c-non_leak for c in before] == [c-non_leak for c in after]
 
 
 def test_thread_stacks():

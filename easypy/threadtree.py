@@ -47,7 +47,12 @@ def start_new_thread(target, *args, **kwargs):
     def wrapper(*args, **kwargs):
         uuid = local_uuid.get()
         UUIDS_TREE[uuid] = parent_uuid
-        return target(*args, **kwargs)
+        try:
+            return target(*args, **kwargs)
+        finally:
+            UUIDS_TREE.pop(uuid, None)
+            IDENT_TO_UUID.pop(_thread.get_ident(), None)
+            UUID_TO_IDENT.pop(uuid, None)
 
     return _orig_start_new_thread(wrapper, *args, **kwargs)
 
@@ -361,6 +366,8 @@ class ThreadContexts():
             raise
         finally:
             ctx.pop(-1)
+            if not ctx:
+                self._context_data.pop(get_thread_uuid())
 
     def flatten(self, thread_uuid=None):
         stack = self._get_context_data(thread_uuid=thread_uuid, combined=True)
