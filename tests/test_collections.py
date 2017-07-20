@@ -17,6 +17,13 @@ def test_collection_filter():
     assert l.filtered(lambda c: c == 'a').sample(1) == ['a']
 
 
+def test_collection_nested_filter():
+    l = ListCollection([Bunch(a=Bunch(b=1, c=2)),
+                        Bunch(a=Bunch(b=2, c=2))])
+    assert list(l.filtered(a__b=1)) == [l[0]]
+    assert list(l.filtered(a__c=2)) == [l[0], l[1]]
+
+
 def test_partial_dict():
     assert partial_dict({'a': 1, 'b': 2, 'c': 3}, ['a', 'b']) == {'a': 1, 'b': 2}
 

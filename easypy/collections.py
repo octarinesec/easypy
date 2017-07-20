@@ -2,7 +2,7 @@ from __future__ import absolute_import
 import collections
 from numbers import Integral
 from itertools import chain, islice
-from functools import partial
+from functools import partial, reduce
 import random
 from .predicates import make_predicate
 from .tokens import UNIQUE
@@ -42,10 +42,17 @@ class defaultlist(list):
 
 
 def _get_value(obj, attr):
-    value = getattr(obj, attr)
-    if callable(value):
-        value = value()
-    return value
+    try:
+        value = getattr(obj, attr)
+    except AttributeError:
+        parts = attr.split('__')
+        if len(parts) == 1:
+            raise
+        return reduce(_get_value, parts, obj)
+    else:
+        if callable(value):
+            value = value()
+        return value
 
 
 def _validate(obj, key, value):
