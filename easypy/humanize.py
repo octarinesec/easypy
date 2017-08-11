@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from easypy.bunch import Bunch, bunchify
 from easypy.colors import colorize
 from easypy.collections import ilistify
+from easypy.misc import Token
 
 
 def compact(line, length, ellipsis="....", suffix_length=20):
@@ -686,3 +687,49 @@ def percentages_comparison(actual, expected, key_caption='Item', color_bounds={'
     for item in sorted(generate(), key=lambda a: a.abs_diff, reverse=True):
         table.add_row(**item)
     return table
+
+
+class Validator():
+
+    def __init__(self, *types, csv = False):
+        self.types = types
+        for typ in self.types:
+            assert callable(typ) or isinstance(typ, (str, Token)), "%s is invalid: must by a str/callable/type/%s" % (typ, Token.__name__)
+        self.csv = csv
+
+    def __call__(self, value, check_csv=True):
+        if self.csv and check_csv:
+            return [self(v.strip(), check_csv=False) for v in value.split(",")]
+
+        value = value.lower()
+        for typ in self.types:
+
+            if isinstance(typ, Token):
+                if typ.name.lower() == value.lower():
+                    return typ
+                continue
+
+            if isinstance(typ, str):
+                if typ.lower() == value.lower():
+                    return typ
+                continue
+
+            try:
+                return typ(value)
+            except ValueError:
+                pass
+
+        raise ValueError("Invalid value: %s (must be %s)" % (value, self.types))
+
+    def __repr__(self):
+        name = "|".join(
+            typ.name if isinstance(typ, Token) else
+            typ if isinstance(typ, str) else
+            typ.__name__
+            for typ in self.types)
+        if self.csv:
+            name += ",..."
+        return name
+
+
+csv = Validator(str, csv=True)

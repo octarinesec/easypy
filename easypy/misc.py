@@ -31,6 +31,10 @@ class Token(str):
     def __repr__(self):
         return self
 
+    @property
+    def name(self):
+        return self.strip("<>")
+
 
 def __LOCATION__():
     frame = inspect.getframeinfo(inspect.stack()[1][0])
