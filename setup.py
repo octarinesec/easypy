@@ -2,11 +2,11 @@
 
 from distutils.core import setup
 
-setup(name='weka-easypy',
-      version='0.1.1',
+setup(name='octarine-easypy',
+      version='0.0.2',
       description='easypy is a collection of python modules that makes developers happy',
       author='Ofer Koren',
-      author_email='koreno [at] gmail.com',
+      author_email='koreno@gmail.com',
       url='https://github.com/weka-io/easypy',
       license='BSD',
       packages=['easypy'])
